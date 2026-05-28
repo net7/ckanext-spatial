@@ -69,7 +69,7 @@ jobs:
           python3-dev \
           libxml2-dev \
           libxslt1-dev \
-          libgeos-c1v5 \
+          libgeos-dev \
           proj-bin
 
     - name: Install dependencies from requirements.txt
