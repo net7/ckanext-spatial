@@ -5,7 +5,7 @@ import os
 import sys
 from io import StringIO
 
-from pkg_resources import resource_stream
+from importlib.resources import files
 import logging
 from ckan.lib.helpers import json
 from lxml import etree
@@ -141,13 +141,13 @@ def get_harvest_object_content(id):
 
 def transform_to_html(content, xslt_package=None, xslt_path=None):
 
-    xslt_package = xslt_package or __name__
+    xslt_package = xslt_package or __package__
     xslt_path = xslt_path or \
         'templates/ckanext/spatial/gemini2-html-stylesheet.xsl'
 
     # optimise -- read transform only once and compile rather
     # than at each request
-    with resource_stream(xslt_package, xslt_path) as style:
+    with (files(xslt_package) / xslt_path).open('rb') as style:
         style_xml = etree.parse(style)
         transformer = etree.XSLT(style_xml)
 
