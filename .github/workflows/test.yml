@@ -70,6 +70,7 @@ jobs:
           libxml2-dev \
           libxslt1-dev \
           libgeos-dev \
+          libproj-dev \
           proj-bin
 
     - name: Install dependencies from requirements.txt
