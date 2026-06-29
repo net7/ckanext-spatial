@@ -87,10 +87,16 @@ class CSWHarvester(SpatialHarvester, SingletonPlugin):
         # extract cql filter if any
         cql = self.source_config.get('cql')
 
+        # net7 patch: allow overriding the ElementSetName used while gathering
+        # identifiers. Some pycsw servers fail to serialize a batch of ISO (gmd)
+        # records with esn="brief" ("Record serialization failed: list index out
+        # of range") but succeed with "summary"/"full". Default stays "brief".
+        esn = self.source_config.get('elementsetname', 'brief')
+
         log.debug('Starting gathering for %s' % url)
         guids_in_harvest = set()
         try:
-            for identifier in self.csw.getidentifiers(page=10, outputschema=self.output_schema(), cql=cql):
+            for identifier in self.csw.getidentifiers(page=10, outputschema=self.output_schema(), cql=cql, esn=esn):
                 try:
                     log.info('Got identifier %s from the CSW', identifier)
                     if identifier is None:
@@ -151,6 +157,11 @@ class CSWHarvester(SpatialHarvester, SingletonPlugin):
         log = logging.getLogger(__name__ + '.CSW.fetch')
         log.debug('CswHarvester fetch_stage for object: %s', harvest_object.id)
 
+        # net7 patch: load the source config here too. fetch_stage may run in a
+        # separate process from gather_stage, so source_config would otherwise
+        # fall back to the empty class default and lose flags like skip_caps.
+        self._set_source_config(harvest_object.source.config)
+
         url = harvest_object.source.url
         try:
             self._setup_csw_client(url)
@@ -188,4 +199,7 @@ class CSWHarvester(SpatialHarvester, SingletonPlugin):
         return True
 
     def _setup_csw_client(self, url):
-        self.csw = CswService(url)
+        # net7 patch: honour a "skip_caps" flag in the source config so that
+        # servers with non-resolvable GetCapabilities XSDs can still be harvested.
+        skip_caps = self.source_config.get('skip_caps', False)
+        self.csw = CswService(url, skip_caps=skip_caps)

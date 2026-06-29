@@ -66,8 +66,13 @@ class CswService(OwsService):
     """
     from owslib.catalogue.csw2 import CatalogueServiceWeb as _Implementation
 
-    def __init__(self, endpoint=None):
-        super(CswService, self).__init__(endpoint)
+    def __init__(self, endpoint=None, skip_caps=False):
+        # net7 patch: allow skipping the GetCapabilities request/XSD validation.
+        # Some CSW servers (e.g. pycsw) advertise capabilities whose XSD imports
+        # remote schemas that lxml cannot resolve, which makes OWSLib raise during
+        # construction. Passing skip_caps=True bypasses that validation.
+        if endpoint is not None:
+            self.__ows_obj__ = self._Implementation(endpoint, skip_caps=skip_caps)
         self.sortby = SortBy([SortProperty('dc:identifier')])
 
     def getrecords(self, qtype=None, keywords=[],
