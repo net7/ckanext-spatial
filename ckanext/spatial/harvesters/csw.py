@@ -93,10 +93,16 @@ class CSWHarvester(SpatialHarvester, SingletonPlugin):
         # of range") but succeed with "summary"/"full". Default stays "brief".
         esn = self.source_config.get('elementsetname', 'brief')
 
+        # net7 patch: when "use_get" is set, gather identifiers via GET KVP
+        # requests instead of getrecords2 (POST). Needed for pycsw servers that
+        # validate POST bodies against unreachable remote XSDs and fail
+        # intermittently. Default stays False (standard POST behaviour).
+        use_get = self.source_config.get('use_get', False)
+
         log.debug('Starting gathering for %s' % url)
         guids_in_harvest = set()
         try:
-            for identifier in self.csw.getidentifiers(page=10, outputschema=self.output_schema(), cql=cql, esn=esn):
+            for identifier in self.csw.getidentifiers(page=10, outputschema=self.output_schema(), cql=cql, esn=esn, use_get=use_get):
                 try:
                     log.info('Got identifier %s from the CSW', identifier)
                     if identifier is None:
@@ -185,8 +191,12 @@ class CSWHarvester(SpatialHarvester, SingletonPlugin):
         try:
             # Save the fetch contents in the HarvestObject
             # Contents come from csw_client already declared and encoded as utf-8
-            # Remove original XML declaration
-            content = re.sub('<xml(.*)>', '', record['xml'])
+            # net7 patch: remove the XML prolog. The original pattern '<xml(.*)>'
+            # never matched the real declaration '<?xml ... ?>', so the prolog was
+            # left in the stored content and later broke etree.fromstring /
+            # ISODocument ("Unicode strings with encoding declaration are not
+            # supported"). Strip the actual '<?xml ... ?>' declaration instead.
+            content = re.sub(r'<\?xml(.*?)\?>', '', record['xml'])
 
             harvest_object.content = content.strip()
             harvest_object.save()

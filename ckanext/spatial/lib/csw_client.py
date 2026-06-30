@@ -105,13 +105,26 @@ class CswService(OwsService):
 
     def getidentifiers(self, qtype=None, typenames="csw:Record", esn="brief",
                        keywords=[], limit=None, page=10, outputschema="gmd",
-                       startposition=0, cql=None, **kw):
+                       startposition=0, cql=None, use_get=False, **kw):
         from owslib.catalogue.csw2 import namespaces
         constraints = []
         csw = self._ows(**kw)
 
         if qtype is not None:
            constraints.append(PropertyIsEqualTo("dc:type", qtype))
+
+        if use_get:
+            # net7 patch: gather identifiers via GET KVP requests instead of
+            # getrecords2 (which uses POST). Some pycsw servers validate the POST
+            # body against remote OGC XSDs and fail intermittently when those
+            # schemas are unreachable ("the document is not valid ... Failed to
+            # parse the XML resource ..."). GET KVP requests are not validated
+            # that way and succeed reliably.
+            for ident in self._getidentifiers_get(
+                    typenames, esn, outputschema, page, startposition,
+                    cql, limit, namespaces):
+                yield ident
+            return
 
         kwa = {
             "constraints": constraints,
@@ -156,6 +169,79 @@ class CswService(OwsService):
                 break
 
             kwa["startposition"] = startposition
+
+    def _getidentifiers_get(self, typenames, esn, outputschema, page,
+                            startposition, cql, limit, namespaces):
+        # net7 patch helper: paginate GetRecords using GET KVP requests and
+        # extract the record identifiers from the response, avoiding the POST
+        # path that triggers buggy remote-XSD validation on some pycsw servers.
+        from owslib import util
+        from owslib.util import openURL, bind_url
+        from urllib.parse import urlencode
+
+        csw = self.__ows_obj__
+        GMD = 'http://www.isotc211.org/2005/gmd'
+        GCO = 'http://www.isotc211.org/2005/gco'
+        DC = 'http://purl.org/dc/elements/1.1/'
+        CSW = 'http://www.opengis.net/cat/csw/2.0.2'
+        OWS = 'http://www.opengis.net/ows'
+
+        matches = 0
+        seen = 0
+        pos = startposition
+        while True:
+            data = {
+                'service': 'CSW',
+                'version': '2.0.2',
+                'request': 'GetRecords',
+                'typenames': typenames,
+                'elementsetname': esn,
+                'outputschema': namespaces[outputschema],
+                'resulttype': 'results',
+                # CSW startPosition is 1-based; getidentifiers uses 0-based.
+                'startposition': pos + 1,
+                'maxrecords': page,
+            }
+            if cql:
+                data['constraintlanguage'] = 'CQL_TEXT'
+                data['constraint'] = cql
+            request = '%s%s' % (bind_url(csw.url), urlencode(data))
+            log.info('Making CSW GET request: %s', request)
+            response = openURL(request, None, 'Get', timeout=csw.timeout,
+                               auth=csw.auth)
+            # openURL returns an OWSLib ResponseWrapper whose read() takes no
+            # size argument, so etree.parse() (which calls read(size)) fails.
+            # Read the full body and parse it instead.
+            root = etree.fromstring(response.read())
+
+            exceptions = root.findall('.//{%s}ExceptionText' % OWS)
+            if root.tag.endswith('ExceptionReport') or exceptions:
+                msg = '; '.join((e.text or '').strip() for e in exceptions)
+                raise CswError('Error getting identifiers (GET): %s' % (msg or 'unknown'))
+
+            results = root.find('.//{%s}SearchResults' % CSW)
+            if results is not None and matches == 0:
+                matches = int(results.get('numberOfRecordsMatched', '0'))
+
+            # Prefer ISO fileIdentifier, fall back to Dublin Core identifier.
+            identifiers = [el.text for el in root.findall(
+                './/{%s}fileIdentifier/{%s}CharacterString' % (GMD, GCO)) if el.text]
+            if not identifiers:
+                identifiers = [el.text for el in root.findall(
+                    './/{%s}identifier' % DC) if el.text]
+
+            if not identifiers:
+                break
+
+            for ident in identifiers:
+                yield ident
+                seen += 1
+                if limit is not None and seen >= limit:
+                    return
+
+            pos += page
+            if matches and pos >= matches:
+                break
 
     def getrecordbyid(self, ids=[], esn="full", outputschema="gmd", **kw):
         from owslib.catalogue.csw2 import namespaces

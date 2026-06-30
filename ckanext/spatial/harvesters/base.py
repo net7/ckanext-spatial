@@ -875,6 +875,12 @@ class SpatialHarvester(HarvesterBase):
         document_string = re.sub('<xml(.*)>', '', document_string)
 
         try:
+            # net7 patch: lxml refuses unicode strings that carry an XML
+            # encoding declaration ("Unicode strings with encoding declaration
+            # are not supported"). CSW GetRecordById responses are stored with a
+            # '<?xml ... encoding="UTF-8"?>' prolog, so encode to bytes first.
+            if isinstance(document_string, str):
+                document_string = document_string.encode('utf-8')
             xml = etree.fromstring(document_string)
         except etree.XMLSyntaxError as e:
             self._save_object_error('Could not parse XML file: {0}'.format(str(e)), harvest_object, 'Import')
